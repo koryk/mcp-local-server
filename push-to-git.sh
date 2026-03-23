@@ -6,7 +6,7 @@
 git init
 
 # 2. Add the remote repository
-git remote add origin https://github.com/DMontgomery40/mcp-local-server.git
+git remote add origin https://github.com/DMontgomery40/mcp-BirdNET-Pi-server.git
 
 # 3. Create and switch to a new branch
 git checkout -b main
@@ -26,4 +26,4 @@ git commit -m "Initial commit: BirdNet-Pi MCP server implementation
 # 6. Push to GitHub
 git push -u origin main
 
-echo "Done! Check your GitHub repository at https://github.com/DMontgomery40/mcp-local-server"
+echo "Done! Check your GitHub repository at https://github.com/DMontgomery40/mcp-BirdNET-Pi-server"

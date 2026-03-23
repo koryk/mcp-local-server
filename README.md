@@ -1,6 +1,6 @@
-# BirdNet-Pi MCP Server
+# mcp-BirdNET-Pi-server
 
-A Model Context Protocol (MCP) server for BirdNet-Pi integration. Provides tools to query bird detection data, statistics, audio recordings, activity patterns, and reports from a local BirdNet-Pi installation.
+A Model Context Protocol (MCP) server for BirdNET-Pi integration. Provides tools to query bird detection data, statistics, audio recordings, activity patterns, and reports from a local BirdNET-Pi installation.
 
 ## Features
 
@@ -58,8 +58,8 @@ MCP_TRANSPORT=http MCP_HTTP_HOST=0.0.0.0 MCP_HTTP_PORT=8000 python server.py
 ### Docker
 
 ```bash
-docker build -t birdnet-pi-mcp .
-docker run -p 8000:8000 -v /path/to/data:/app/data birdnet-pi-mcp
+docker build -t mcp-birdnet-pi-server .
+docker run -p 8000:8000 -v /path/to/data:/app/data mcp-birdnet-pi-server
 ```
 
 ### Claude Desktop
@@ -71,7 +71,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "birdnet": {
       "command": "python",
-      "args": ["/absolute/path/to/mcp-local-server/server.py"]
+      "args": ["/absolute/path/to/mcp-BirdNET-Pi-server/server.py"]
     }
   }
 }
@@ -115,7 +115,7 @@ python -m pytest test_server.py -v
 ## Directory Structure
 
 ```
-mcp-local-server/
+mcp-BirdNET-Pi-server/
 ├── birdnet/
 │   ├── __init__.py
 │   ├── config.py

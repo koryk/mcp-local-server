@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BirdNet-Pi MCP Server — Model Context Protocol interface for bird detection data.
+"""mcp-BirdNET-Pi-server — Model Context Protocol interface for BirdNET-Pi detection data.
 
 Supports both stdio and streamable-http transports.
 """
