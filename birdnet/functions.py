@@ -1,159 +1,201 @@
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
-import json
 import base64
-import os
-from .utils import (
-    read_detections_file,
-    get_audio_buffer,
-    filter_detections_by_date,
-    filter_detections_by_species,
-    calculate_confidence_stats
-)
-from .config import default_config
+from datetime import date, timedelta
+from typing import Optional, Dict, Any
+
+from .config import get_connection
+from .utils import get_audio_bytes
+
 
 async def get_bird_detections(
     start_date: str,
     end_date: str,
-    species: Optional[str] = None
+    species: Optional[str] = None,
 ) -> Dict[str, Any]:
-    detections = await read_detections_file(default_config)
-    detections = filter_detections_by_date(detections, start_date, end_date)
-    
-    if species:
-        detections = filter_detections_by_species(detections, species)
-    
-    stats = calculate_confidence_stats(detections)
-    
-    return {
-        "detections": detections,
-        "stats": stats,
-        "total": len(detections)
-    }
+    with get_connection() as conn:
+        if species:
+            rows = conn.execute(
+                """SELECT Date, Time, Com_Name, Confidence, File_Name
+                   FROM detections
+                   WHERE Date BETWEEN ? AND ?
+                     AND LOWER(Com_Name) LIKE ?
+                   ORDER BY Date DESC, Time DESC""",
+                (start_date, end_date, f'%{species.lower()}%'),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT Date, Time, Com_Name, Confidence, File_Name
+                   FROM detections
+                   WHERE Date BETWEEN ? AND ?
+                   ORDER BY Date DESC, Time DESC""",
+                (start_date, end_date),
+            ).fetchall()
+
+    detections = [dict(r) for r in rows]
+
+    if detections:
+        confidences = [d['Confidence'] for d in detections]
+        stats = {
+            "min": min(confidences),
+            "max": max(confidences),
+            "average": sum(confidences) / len(confidences),
+        }
+    else:
+        stats = {"min": 0.0, "max": 0.0, "average": 0.0}
+
+    return {"detections": detections, "stats": stats, "total": len(detections)}
+
 
 async def get_detection_stats(
     period: str,
-    min_confidence: float = 0.0
+    min_confidence: float = 0.0,
 ) -> Dict[str, Any]:
-    detections = await read_detections_file(default_config)
-    now = datetime.now()
-    
-    period_map = {
-        "day": timedelta(days=1),
-        "week": timedelta(weeks=1),
-        "month": timedelta(days=30)
+    today = date.today()
+    period_cutoffs = {
+        "day": today - timedelta(days=1),
+        "week": today - timedelta(weeks=1),
+        "month": today - timedelta(days=30),
+        "all": date(2000, 1, 1),
     }
-    
-    filtered_detections = [
-        d for d in detections
-        if (period == "all" or 
-            now - datetime.fromisoformat(d["timestamp"]) <= period_map[period])
-        and d["confidence"] >= min_confidence
-    ]
-    
-    # Calculate statistics
-    unique_species = set(d["species"] for d in filtered_detections)
-    detections_by_species = {}
-    for detection in filtered_detections:
-        species = detection["species"]
-        detections_by_species[species] = detections_by_species.get(species, 0) + 1
-    
-    top_species = sorted(
-        [{"species": k, "count": v} for k, v in detections_by_species.items()],
-        key=lambda x: x["count"],
-        reverse=True
-    )[:10]
-    
-    confidence_stats = calculate_confidence_stats(filtered_detections)
-    
+    cutoff_date = period_cutoffs.get(period, date(2000, 1, 1)).isoformat()
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT Com_Name, COUNT(*) as count,
+                      MIN(Confidence) as min_conf,
+                      MAX(Confidence) as max_conf,
+                      AVG(Confidence) as avg_conf
+               FROM detections
+               WHERE Date >= ? AND Confidence >= ?
+               GROUP BY Com_Name
+               ORDER BY count DESC""",
+            (cutoff_date, min_confidence),
+        ).fetchall()
+
+    rows = [dict(r) for r in rows]
+    total = sum(r['count'] for r in rows)
+    detections_by_species = {r['Com_Name']: r['count'] for r in rows}
+    top_species = [{"species": r['Com_Name'], "count": r['count']} for r in rows[:10]]
+
+    if total > 0:
+        conf_stats = {
+            "min": min(r['min_conf'] for r in rows),
+            "max": max(r['max_conf'] for r in rows),
+            "average": sum(r['avg_conf'] * r['count'] for r in rows) / total,
+        }
+    else:
+        conf_stats = {"min": 0.0, "max": 0.0, "average": 0.0}
+
     return {
-        "totalDetections": len(filtered_detections),
-        "uniqueSpecies": len(unique_species),
+        "totalDetections": total,
+        "uniqueSpecies": len(rows),
         "detectionsBySpecies": detections_by_species,
         "topSpecies": top_species,
-        "confidenceStats": confidence_stats,
+        "confidenceStats": conf_stats,
         "periodCovered": period,
-        "minConfidence": min_confidence
+        "minConfidence": min_confidence,
     }
+
 
 async def get_audio_recording(
     filename: str,
-    format: str = 'base64'
+    format: str = 'base64',
 ) -> Dict[str, Any]:
-    audio_buffer = await get_audio_buffer(default_config, filename)
+    audio_buffer = get_audio_bytes(filename)
     if format == 'base64':
         return {
             "audio": base64.b64encode(audio_buffer).decode('utf-8'),
-            "format": format
+            "format": "base64",
         }
-    return {
-        "audio": audio_buffer,
-        "format": 'buffer'
-    }
+    return {"audio": audio_buffer, "format": "buffer"}
+
 
 async def get_daily_activity(
-    date: str,
-    species: Optional[str] = None
+    date_str: str,
+    species: Optional[str] = None,
 ) -> Dict[str, Any]:
-    detections = await read_detections_file(default_config)
-    target_date = datetime.fromisoformat(date)
-    
-    # Filter detections for the target date
-    day_detections = [
-        d for d in detections
-        if datetime.fromisoformat(d["timestamp"]).date() == target_date.date()
-    ]
-    
-    if species:
-        day_detections = filter_detections_by_species(day_detections, species)
-    
-    # Calculate hourly activity
+    with get_connection() as conn:
+        if species:
+            rows = conn.execute(
+                """SELECT CAST(SUBSTR(Time, 1, 2) AS INT) as hour, Com_Name, COUNT(*) as count
+                   FROM detections
+                   WHERE Date = ? AND LOWER(Com_Name) LIKE ?
+                   GROUP BY hour, Com_Name""",
+                (date_str, f'%{species.lower()}%'),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT CAST(SUBSTR(Time, 1, 2) AS INT) as hour, Com_Name, COUNT(*) as count
+                   FROM detections
+                   WHERE Date = ?
+                   GROUP BY hour, Com_Name""",
+                (date_str,),
+            ).fetchall()
+
+    rows = [dict(r) for r in rows]
     hourly_activity = [0] * 24
-    for detection in day_detections:
-        hour = datetime.fromisoformat(detection["timestamp"]).hour
-        hourly_activity[hour] += 1
-    
+    unique_species = set()
+    for row in rows:
+        hourly_activity[row['hour']] += row['count']
+        unique_species.add(row['Com_Name'])
+
+    total = sum(hourly_activity)
+    peak_hour = hourly_activity.index(max(hourly_activity)) if total > 0 else 0
+
     return {
-        "date": date,
+        "date": date_str,
         "species": species or "all",
-        "totalDetections": len(day_detections),
+        "totalDetections": total,
         "hourlyActivity": hourly_activity,
-        "peakHour": hourly_activity.index(max(hourly_activity)),
-        "uniqueSpecies": len(set(d["species"] for d in day_detections))
+        "peakHour": peak_hour,
+        "uniqueSpecies": len(unique_species),
     }
+
 
 async def generate_detection_report(
     start_date: str,
     end_date: str,
-    format: str = 'html'
+    format: str = 'json',
 ) -> Dict[str, Any]:
-    detections = await get_bird_detections(start_date, end_date)
-    stats = await get_detection_stats("all")
-    
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT Date, Time, Com_Name, Confidence, File_Name
+               FROM detections
+               WHERE Date BETWEEN ? AND ?
+               ORDER BY Date DESC, Time DESC""",
+            (start_date, end_date),
+        ).fetchall()
+
+    detections = [dict(r) for r in rows]
+    by_species: Dict[str, int] = {}
+    for d in detections:
+        by_species[d['Com_Name']] = by_species.get(d['Com_Name'], 0) + 1
+
+    total = len(detections)
+    unique = len(by_species)
+
     if format == 'html':
-        # Generate HTML report
-        html_content = f"""
-        <html>
-            <head><title>Bird Detection Report</title></head>
-            <body>
-                <h1>Bird Detection Report</h1>
-                <p>Period: {start_date} to {end_date}</p>
-                <h2>Summary</h2>
-                <ul>
-                    <li>Total Detections: {stats['totalDetections']}</li>
-                    <li>Unique Species: {stats['uniqueSpecies']}</li>
-                </ul>
-                <!-- Add more report content -->
-            </body>
-        </html>
-        """
-        return {"report": html_content, "format": "html"}
-    
+        table_rows = ''.join(
+            f'<tr><td>{d["Date"]}</td><td>{d["Time"]}</td>'
+            f'<td>{d["Com_Name"]}</td><td>{d["Confidence"]:.3f}</td></tr>'
+            for d in detections
+        )
+        html = (
+            f'<html><head><title>Bird Detection Report</title></head><body>'
+            f'<h1>Bird Detection Report</h1>'
+            f'<p>Period: {start_date} to {end_date}</p>'
+            f'<h2>Summary</h2>'
+            f'<ul><li>Total Detections: {total}</li><li>Unique Species: {unique}</li></ul>'
+            f'<table border="1"><tr><th>Date</th><th>Time</th><th>Species</th><th>Confidence</th></tr>'
+            f'{table_rows}</table>'
+            f'</body></html>'
+        )
+        return {"report": html, "format": "html"}
+
     return {
         "report": {
             "period": {"start": start_date, "end": end_date},
-            "summary": stats,
-            "detections": detections
+            "summary": {"totalDetections": total, "uniqueSpecies": unique, "bySpecies": by_species},
+            "detections": detections,
         },
-        "format": "json"
+        "format": "json",
     }

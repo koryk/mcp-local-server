@@ -1,7 +1,9 @@
 import os
+import sqlite3
 
-default_config = {
-    'detections_file': os.getenv('BIRDNET_DETECTIONS_FILE', 'data/detections.json'),
-    'audio_dir': os.getenv('BIRDNET_AUDIO_DIR', 'data/audio'),
-    'report_dir': os.getenv('BIRDNET_REPORT_DIR', 'data/reports')
-}
+
+def get_connection() -> sqlite3.Connection:
+    db_path = os.path.expanduser(os.getenv('BIRDNET_DB', '~/BirdNET-Pi/scripts/birds.db'))
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn

@@ -5,7 +5,6 @@ Supports both stdio and streamable-http transports.
 """
 
 import os
-import sys
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -28,6 +27,8 @@ mcp = FastMCP(
     "birdnet-pi",
     stateless_http=True,
     json_response=True,
+    host=os.environ.get("MCP_HTTP_HOST", "127.0.0.1"),
+    port=int(os.environ.get("MCP_HTTP_PORT", "8090")),
 )
 
 
@@ -219,10 +220,4 @@ async def generate_report(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    transport = os.environ.get("MCP_TRANSPORT", "stdio")
-    if transport == "http" or transport == "streamable-http":
-        host = os.environ.get("MCP_HTTP_HOST", "127.0.0.1")
-        port = int(os.environ.get("MCP_HTTP_PORT", "8000"))
-        mcp.run(transport="streamable-http", host=host, port=port)
-    else:
-        mcp.run(transport="stdio")
+    mcp.run(transport="streamable-http")
